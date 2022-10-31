@@ -30,6 +30,7 @@ struct thermocouple_spi {
     uint32_t consecutive_faults;
     uint32_t consecutive_fault_limit;
     struct spidev_s *spi;
+    uint8_t max_invalid, invalid_count;
     uint8_t chip_type, flags;
 };
 
@@ -80,11 +81,13 @@ command_query_thermocouple(uint32_t *args)
         return;
     spi->min_value = args[3];
     spi->max_value = args[4];
+    spi->max_invalid = args[5];
+    spi->invalid_count = 0;
     sched_add_timer(&spi->timer);
 }
 DECL_COMMAND(command_query_thermocouple,
              "query_thermocouple oid=%c clock=%u rest_ticks=%u"
-             " min_value=%u max_value=%u");
+             " min_value=%u max_value=%u max_invalid_count=%c");
 
 static void
 thermocouple_respond(struct thermocouple_spi *spi, uint32_t next_begin_time
@@ -94,19 +97,13 @@ thermocouple_respond(struct thermocouple_spi *spi, uint32_t next_begin_time
           " consecutive_faults=%c",
           oid, next_begin_time, value, fault, spi->consecutive_faults);
     /* check the result and stop if below or above allowed range */
-    if (value < spi->min_value || value > spi->max_value) {
-        spi->consecutive_faults++;
-        if (spi->consecutive_faults <= spi->consecutive_fault_limit)
-            return;
-        try_shutdown("Thermocouple ADC out of range");
-    } else if (fault > 0) {
-        spi->consecutive_faults++;
-        if (spi->consecutive_faults <= spi->consecutive_fault_limit)
+    if (fault || value < spi->min_value || value > spi->max_value) {
+        spi->invalid_count++;
+        if (spi->invalid_count < spi->max_invalid)
             return;
         try_shutdown("Thermocouple reader fault");
-    } else {
-        spi->consecutive_faults = 0;
     }
+    spi->invalid_count = 0;
 }
 
 static void
@@ -118,10 +115,7 @@ thermocouple_handle_max31855(struct thermocouple_spi *spi
     uint32_t value;
     memcpy(&value, msg, sizeof(value));
     value = be32_to_cpu(value);
-    thermocouple_respond(spi, next_begin_time, value, 0, oid);
-    // Kill after data send, host decode an error
-    if (value & 0x04)
-        try_shutdown("Thermocouple reader fault");
+    thermocouple_respond(spi, next_begin_time, value, value & 0x07, oid);
 }
 
 #define MAX31856_LTCBH_REG 0x0C
@@ -159,7 +153,8 @@ thermocouple_handle_max31865(struct thermocouple_spi *spi
     msg[0] = MAX31865_FAULTSTAT_REG;
     msg[1] = 0x00;
     spidev_transfer(spi->spi, 1, 2, msg);
-    thermocouple_respond(spi, next_begin_time, value, msg[1], oid);
+    uint8_t fault = (msg[1] & ~0x03) | (value & 0x0001);
+    thermocouple_respond(spi, next_begin_time, value, fault, oid);
 }
 
 static void
@@ -171,11 +166,7 @@ thermocouple_handle_max6675(struct thermocouple_spi *spi
     uint16_t value;
     memcpy(&value, msg, sizeof(msg));
     value = be16_to_cpu(value);
-    thermocouple_respond(spi, next_begin_time, value, 0, oid);
-    // Kill after data send, host decodes an error. This is raised when the
-    // thermocouple is detected as open.
-    if (value & 0x04)
-        try_shutdown("Thermocouple reader fault");
+    thermocouple_respond(spi, next_begin_time, value, value & 0x06, oid);
 }
 
 // task to read thermocouple and send response
