@@ -337,14 +337,15 @@ HC_TARGET = "hub-ctrl"
 HC_CMD = "sudo %s/hub-ctrl -h 0 -P 2 -p %d"
 
 def run_hub_ctrl(enable_power):
-    srcdir = os.path.dirname(os.path.realpath(__file__))
-    hubdir = os.path.join(srcdir, HC_SOURCE_DIR)
-    srcfiles = get_abs_files(hubdir, HC_SOURCE_FILES)
-    destlib = get_abs_files(hubdir, [HC_TARGET])[0]
-    if check_build_code(srcfiles, destlib):
-        logging.info("Building C code module %s", HC_TARGET)
-        do_build_code(HC_COMPILE_CMD % (destlib, ' '.join(srcfiles)))
-    os.system(HC_CMD % (hubdir, enable_power))
+#    srcdir = os.path.dirname(os.path.realpath(__file__))
+#    hubdir = os.path.join(srcdir, HC_SOURCE_DIR)
+#    srcfiles = get_abs_files(hubdir, HC_SOURCE_FILES)
+#    destlib = get_abs_files(hubdir, [HC_TARGET])[0]
+#    if check_build_code(srcfiles, destlib):
+#        logging.info("Building C code module %s", HC_TARGET)
+#        do_build_code(HC_COMPILE_CMD % (destlib, ' '.join(srcfiles)))
+#    os.system(HC_CMD % (hubdir, enable_power))
+    os.system("sudo uhubctl -f -l 1-1.3 -a %d" % (enable_power))
 
 
 if __name__ == '__main__':
